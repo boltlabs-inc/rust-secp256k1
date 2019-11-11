@@ -310,4 +310,39 @@ static int secp256k1_ecdsa_sig_sign(const secp256k1_ecmult_gen_context *ctx, sec
     return 1;
 }
 
+static int secp256k1_ecdsa_precompute_sig_internal(const secp256k1_ecmult_gen_context *ctx,
+                                          secp256k1_scalar *sig_r, secp256k1_scalar *sig_s_partial,
+                                          secp256k1_scalar *sig_k_inv, const secp256k1_scalar *seckey,
+                                          const secp256k1_scalar *nonce, int *recid) {
+    unsigned char b[32];
+    secp256k1_gej rp;
+    secp256k1_ge r;
+    int overflow = 0;
+
+    secp256k1_ecmult_gen(ctx, &rp, nonce);
+    secp256k1_ge_set_gej(&r, &rp);
+    secp256k1_fe_normalize(&r.x);
+    secp256k1_fe_normalize(&r.y);
+    secp256k1_fe_get_b32(b, &r.x);
+    secp256k1_scalar_set_b32(sig_r, b, &overflow);
+    /* These two conditions should be checked before calling */
+    VERIFY_CHECK(!secp256k1_scalar_is_zero(sig_r));
+    VERIFY_CHECK(overflow == 0);
+
+    if (recid) {
+        /* The overflow condition is cryptographically unreachable as hitting it requires finding the discrete log
+         * of some P where P.x >= order, and only 1 in about 2^127 points meet this criteria.
+         */
+        *recid = (overflow ? 2 : 0) | (secp256k1_fe_is_odd(&r.y) ? 1 : 0);
+    }
+
+    secp256k1_scalar_mul(sig_s_partial, sig_r, seckey); /* compute r = r_x * x mod q */
+    secp256k1_scalar_inverse(sig_k_inv, nonce); /* compute k^-1 */
+
+    secp256k1_gej_clear(&rp);
+    secp256k1_ge_clear(&r);
+    return 1;
+}
+
+
 #endif /* SECP256K1_ECDSA_IMPL_H */

@@ -113,6 +113,27 @@ impl Default for Signature {
     }
 }
 
+/// Library-internal representation of a Secp256k1 precomputed signature
+#[repr(C)]
+pub struct PartialSignature([c_uchar; 96]);
+impl_array_newtype!(PartialSignature, c_uchar, 96);
+impl_raw_debug!(PartialSignature);
+
+impl PartialSignature {
+    /// Create a new (zeroed) signature usable for the FFI interface
+    pub fn new() -> PartialSignature { PartialSignature([0; 96]) }
+    /// Create a new (uninitialized) signature usable for the FFI interface
+    #[deprecated(since = "0.15.3", note = "Please use the new function instead")]
+    pub unsafe fn blank() -> PartialSignature { PartialSignature::new() }
+}
+
+impl Default for PartialSignature {
+    fn default() -> Self {
+        PartialSignature::new()
+    }
+}
+
+
 /// Library-internal representation of an ECDH shared secret
 #[repr(C)]
 pub struct SharedSecret([c_uchar; 32]);
@@ -190,6 +211,12 @@ extern "C" {
                                                        sig: *const Signature)
                                                        -> c_int;
 
+    // serialize for partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_partial_signature_serialize_compact(cx: *const Context, output64: *const c_uchar,
+                                                       sig: *const PartialSignature)
+                                                       -> c_int;
+
+
     pub fn secp256k1_ecdsa_signature_normalize(cx: *const Context, out_sig: *mut Signature,
                                                in_sig: *const Signature)
                                                -> c_int;
@@ -208,6 +235,14 @@ extern "C" {
                                 noncefn: NonceFn,
                                 noncedata: *const c_void)
                                 -> c_int;
+
+    // compute partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_precompute_sig(cx: *const Context,
+                                          pre_sig: *mut PartialSignature,
+                                          noncedata32: *const c_uchar,
+                                          sk: *const c_uchar,
+                                          noncefn: NonceFn)
+                                          -> c_int;
 
     // EC
     pub fn secp256k1_ec_seckey_verify(cx: *const Context,

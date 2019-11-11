@@ -4,22 +4,6 @@ extern crate secp256k1;
 //use bitcoin_hashes::{sha256, Hash};
 use secp256k1::{Error, Message, PublicKey, Secp256k1, Signing, SecretKey, PartialSignature};
 
-//fn verify<C: Verification>(secp: &Secp256k1<C>, msg: &[u8], sig: [u8; 64], pubkey: [u8; 33]) -> Result<bool, Error> {
-//    let msg = sha256::Hash::hash(msg);
-//    let msg = Message::from_slice(&msg)?;
-//    let sig = Signature::from_compact(&sig)?;
-//    let pubkey = PublicKey::from_slice(&pubkey)?;
-//
-//    Ok(secp.verify(&msg, &sig, &pubkey).is_ok())
-//}
-
-//fn sign<C: Signing>(secp: &Secp256k1<C>, msg: &[u8], seckey: [u8; 32]) -> Result<Signature, Error> {
-//    let msg = sha256::Hash::hash(msg);
-//    let msg = Message::from_slice(&msg)?;
-//    let seckey = SecretKey::from_slice(&seckey)?;
-//    Ok(secp.sign(&msg, &seckey))
-//}
-
 fn partial_sign<C: Signing>(secp: &Secp256k1<C>, nonce32: &[u8], seckey: [u8; 32]) -> Result<PartialSignature, Error> {
     // let msg = sha256::Hash::hash(msg);
     let nonce = Message::from_slice(&nonce32)?;
@@ -39,7 +23,10 @@ fn main() {
 
     println!("Partial sig bytes: {}", partial_sig);
 
-    // let serialize_sig = signature.serialize_compact();
+    let _serialize_sig = partial_sig.serialize_compact();
 
+    // TODO: compute rest of ECDSA based on hash digest
     //assert!(verify(&secp, msg, serialize_sig, pubkey).unwrap());
+
+    // TODO: test func for re-randomizing final sig
 }

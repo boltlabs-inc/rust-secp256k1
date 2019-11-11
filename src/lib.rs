@@ -173,6 +173,10 @@ use ffi::CPtr;
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Signature(ffi::Signature);
 
+// A partial ECDSA signature (for libzkchannels)
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct PartialSignature(ffi::PartialSignature);
+
 /// A DER serialized Signature
 #[derive(Copy, Clone)]
 pub struct SerializedSignature {
@@ -410,6 +414,65 @@ impl From<ffi::Signature> for Signature {
     }
 }
 
+// start for libzkchannels
+impl CPtr for PartialSignature {
+    type Target = ffi::PartialSignature;
+    fn as_c_ptr(&self) -> *const Self::Target {
+        self.as_ptr()
+    }
+
+    fn as_mut_c_ptr(&mut self) -> *mut Self::Target {
+        self.as_mut_ptr()
+    }
+}
+
+impl From<ffi::PartialSignature> for PartialSignature {
+    #[inline]
+    fn from(sig: ffi::PartialSignature) -> PartialSignature {
+        PartialSignature(sig)
+    }
+}
+
+impl PartialSignature {
+    #[inline]
+    /// Serializes the signature in compact format
+    pub fn serialize_compact(&self) -> [u8; 96] {
+        let mut ret = [0; 96];
+        unsafe {
+            let err = ffi::secp256k1_ecdsa_partial_signature_serialize_compact(
+                ffi::secp256k1_context_no_precomp,
+                ret.as_mut_c_ptr(),
+                self.as_c_ptr(),
+            );
+            debug_assert!(err == 1);
+        }
+        ret
+    }
+
+    /// Obtains a raw pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_ptr(&self) -> *const ffi::PartialSignature {
+        &self.0 as *const _
+    }
+
+    /// Obtains a raw mutable pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut ffi::PartialSignature {
+        &mut self.0 as *mut _
+    }
+}
+
+impl fmt::Display for PartialSignature {
+fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    let sig = self.serialize_compact();
+    for v in sig.iter() {
+        write!(f, "{:02x}", v)?;
+    }
+    Ok(())
+}
+}
+
+// end for libzkchannels
 
 #[cfg(feature = "serde")]
 impl ::serde::Serialize for Signature {
@@ -638,6 +701,21 @@ impl<C: Signing> Secp256k1<C> {
 
         Signature::from(ret)
     }
+
+    // Compute a partial signature by precomputing the r = (r_x, r_y), partial s = (r_x * x) mod q
+    // and k^-1. Nonce data represents the random seed to PRG for computing k.
+    pub fn partial_sign(&self, noncedata: &Message, sk: &key::SecretKey) -> PartialSignature {
+        let mut ret = ffi::PartialSignature::new();
+        unsafe {
+            // We can assume the return value because it's not possible to construct
+            // an invalid signature from a valid `Message` and `SecretKey`
+            assert_eq!(ffi::secp256k1_ecdsa_precompute_sig(self.ctx, &mut ret, noncedata.as_c_ptr(),
+                                                 sk.as_c_ptr(), ffi::secp256k1_nonce_function_rfc6979), 1);
+        }
+
+        PartialSignature::from(ret)
+    }
+
 
     /// Generates a random keypair. Convenience function for `key::SecretKey::new`
     /// and `key::PublicKey::from_secret_key`; call those functions directly for

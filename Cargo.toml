@@ -64,5 +64,8 @@ required-features = ["recovery"]
 name = "sign_verify"
 
 [[example]]
+name = "partial_sign"
+
+[[example]]
 name = "generate_keys"
 required-features = ["rand"]
