@@ -449,6 +449,28 @@ impl PartialSignature {
         ret
     }
 
+    /// Converts a 96-byte compact-encoded byte slice to a signature
+    pub fn from_compact(data: &[u8]) -> Result<PartialSignature, Error> {
+        let mut ret = ffi::PartialSignature::new();
+        if data.len() != 96 {
+            return Err(Error::InvalidSignature)
+        }
+
+        unsafe {
+            if ffi::secp256k1_ecdsa_partial_signature_parse_compact(
+                ffi::secp256k1_context_no_precomp,
+                &mut ret,
+                data.as_c_ptr(),
+            ) == 1
+            {
+                Ok(PartialSignature(ret))
+            } else {
+                Err(Error::InvalidSignature)
+            }
+        }
+    }
+
+
     /// Obtains a raw pointer suitable for use with FFI functions
     #[inline]
     pub fn as_ptr(&self) -> *const ffi::PartialSignature {
@@ -707,8 +729,6 @@ impl<C: Signing> Secp256k1<C> {
     pub fn partial_sign(&self, noncedata: &Message, sk: &key::SecretKey) -> PartialSignature {
         let mut ret = ffi::PartialSignature::new();
         unsafe {
-            // We can assume the return value because it's not possible to construct
-            // an invalid signature from a valid `Message` and `SecretKey`
             assert_eq!(ffi::secp256k1_ecdsa_precompute_sig(self.ctx, &mut ret, noncedata.as_c_ptr(),
                                                  sk.as_c_ptr(), ffi::secp256k1_nonce_function_rfc6979), 1);
         }
@@ -716,6 +736,22 @@ impl<C: Signing> Secp256k1<C> {
         PartialSignature::from(ret)
     }
 
+    pub fn compute_sign(&self, msg: &Message, partial_sig: &PartialSignature) -> Signature {
+        let mut ret = ffi::Signature::new();
+        unsafe {
+            assert_eq!(ffi::secp256k1_ecdsa_finalize_sig(self.ctx, &mut ret, partial_sig.as_c_ptr(), msg.as_c_ptr()), 1);
+        }
+
+        Signature::from(ret)
+    }
+
+    pub fn rerandomize_sig(&self, rand: &Message, sig: &Signature) -> Signature {
+        let mut ret = ffi::Signature::new();
+        unsafe {
+            assert_eq!(ffi::secp256k1_ecdsa_rerandomize_sig(self.ctx, &mut ret, sig.as_c_ptr(), rand.as_c_ptr()), 1);
+        }
+        Signature::from(ret)
+    }
 
     /// Generates a random keypair. Convenience function for `key::SecretKey::new`
     /// and `key::PublicKey::from_secret_key`; call those functions directly for

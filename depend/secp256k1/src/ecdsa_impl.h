@@ -344,5 +344,43 @@ static int secp256k1_ecdsa_precompute_sig_internal(const secp256k1_ecmult_gen_co
     return 1;
 }
 
+static int secp256k1_ecdsa_finalize_sig_internal(const secp256k1_ecmult_gen_context *ctx,
+                                          secp256k1_scalar *sig_r, secp256k1_scalar *sig_s,
+                                          secp256k1_scalar *sig_k_inv, const secp256k1_scalar *message) {
+
+    VERIFY_CHECK(!secp256k1_scalar_is_zero(sig_r));
+    if (ctx == NULL) {
+        return 0;
+    }
+
+    secp256k1_scalar_add(sig_s, sig_s, message); /* compute part_s = (r_x * x + H(m)) */
+    secp256k1_scalar_mul(sig_s, sig_s, sig_k_inv); /* compute sig_s = (k^-1 * part_s) */
+
+    if (secp256k1_scalar_is_zero(sig_s)) {
+        return 0;
+    }
+    if (secp256k1_scalar_is_high(sig_s)) {
+        secp256k1_scalar_negate(sig_s, sig_s);
+    }
+    return 1;
+}
+
+static int secp256k1_ecdsa_rerandomize_sig_internal(const secp256k1_ecmult_gen_context *ctx, secp256k1_scalar *sig_r, secp256k1_scalar *sig_s, const secp256k1_scalar *new_rand) {
+    if (secp256k1_scalar_is_zero(sig_r) || secp256k1_scalar_is_zero(sig_s)) {
+        return 0;
+    }
+    if (ctx == NULL)
+        return 0;
+
+    secp256k1_scalar jinv;
+
+    secp256k1_scalar_mul(sig_r, sig_r, new_rand);
+    secp256k1_scalar_inverse(&jinv, new_rand);
+    secp256k1_scalar_mul(sig_s, sig_s, &jinv);
+    secp256k1_scalar_clear(&jinv);
+
+    return 1;
+}
+
 
 #endif /* SECP256K1_ECDSA_IMPL_H */

@@ -199,6 +199,12 @@ extern "C" {
                                                    input64: *const c_uchar)
                                                    -> c_int;
 
+    // parse partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_partial_signature_parse_compact(cx: *const Context, sig: *mut PartialSignature,
+                                                   input64: *const c_uchar)
+                                                   -> c_int;
+
+
     pub fn ecdsa_signature_parse_der_lax(cx: *const Context, sig: *mut Signature,
                                          input: *const c_uchar, in_len: usize)
                                          -> c_int;
@@ -243,6 +249,17 @@ extern "C" {
                                           sk: *const c_uchar,
                                           noncefn: NonceFn)
                                           -> c_int;
+
+    pub fn secp256k1_ecdsa_finalize_sig(cx: *const Context,
+                                          sig: *mut Signature,
+                                          partial_sig: *const PartialSignature,
+                                          msg: *const c_uchar)
+                                          -> c_int;
+
+    pub fn secp256k1_ecdsa_rerandomize_sig(cx: *const Context,
+                                          new_sig: *mut Signature,
+                                          sig: *const Signature,
+                                          rand: *const c_uchar) -> c_int;
 
     // EC
     pub fn secp256k1_ec_seckey_verify(cx: *const Context,

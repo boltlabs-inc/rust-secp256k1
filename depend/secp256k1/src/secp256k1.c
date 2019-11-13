@@ -338,6 +338,30 @@ int secp256k1_ecdsa_signature_parse_compact(const secp256k1_context* ctx, secp25
     return ret;
 }
 
+int secp256k1_ecdsa_partial_signature_parse_compact(const secp256k1_context* ctx, secp256k1_ecdsa_pre_signature* sig, const unsigned char *input96) {
+    secp256k1_scalar r, s, kinv;
+    int ret = 1;
+    int overflow = 0;
+
+    VERIFY_CHECK(ctx != NULL);
+    ARG_CHECK(sig != NULL);
+    ARG_CHECK(input96 != NULL);
+
+    secp256k1_scalar_set_b32(&r, &input96[0], &overflow);
+    ret &= !overflow;
+    secp256k1_scalar_set_b32(&s, &input96[32], &overflow);
+    ret &= !overflow;
+    secp256k1_scalar_set_b32(&kinv, &input96[64], &overflow);
+    ret &= !overflow;
+    if (ret) {
+        secp256k1_ecdsa_pre_signature_save(sig, &r, &s, &kinv);
+    } else {
+        memset(sig, 0, sizeof(*sig));
+    }
+    return ret;
+}
+
+
 int secp256k1_ecdsa_signature_serialize_der(const secp256k1_context* ctx, unsigned char *output, size_t *outputlen, const secp256k1_ecdsa_signature* sig) {
     secp256k1_scalar r, s;
 
@@ -499,7 +523,7 @@ int secp256k1_ecdsa_sign(const secp256k1_context* ctx, secp256k1_ecdsa_signature
     return ret;
 }
 
-/* expose ability to precompute ECDSA signature */
+/* expose ability to precompute ECDSA signature for libzkchannels */
 int secp256k1_ecdsa_precompute_sig(const secp256k1_context* ctx,
                                    secp256k1_ecdsa_pre_signature *signature,
                                    const unsigned char *noncedata32,
@@ -523,7 +547,7 @@ int secp256k1_ecdsa_precompute_sig(const secp256k1_context* ctx,
     if (!overflow && !secp256k1_scalar_is_zero(&sec)) {
         unsigned char nonce32[32];
         unsigned int count = 0;
-        secp256k1_scalar_set_b32(&msg, noncedata32, NULL);
+
         while (1) {
             ret = noncefp(nonce32, noncedata32, seckey, NULL, NULL, count);
             if (!ret) {
@@ -549,6 +573,59 @@ int secp256k1_ecdsa_precompute_sig(const secp256k1_context* ctx,
         memset(signature, 0, sizeof(*signature));
     }
 
+    return ret;
+}
+
+/* expose ability to precompute ECDSA signature for libzkchannels */
+int secp256k1_ecdsa_finalize_sig(const secp256k1_context* ctx,
+                                   secp256k1_ecdsa_signature *signature,
+                                   secp256k1_ecdsa_pre_signature *partial_sig,
+                                   const unsigned char *msg32) {
+    secp256k1_scalar r, s, kinv, msg;
+    int ret;
+    ARG_CHECK(secp256k1_ecmult_gen_context_is_built(&ctx->ecmult_gen_ctx));
+    ARG_CHECK(signature != NULL);
+    ARG_CHECK(partial_sig != NULL);
+
+    secp256k1_scalar_set_b32(&msg, msg32, NULL);
+    secp256k1_ecdsa_pre_signature_load(ctx, &r, &s, &kinv, partial_sig);
+
+    if ((ret = secp256k1_ecdsa_finalize_sig_internal(&ctx->ecmult_gen_ctx, &r, &s, &kinv, &msg)) == 0) {
+        secp256k1_scalar_clear(&msg);
+        return 0;
+    }
+
+    if (ret) {
+        secp256k1_ecdsa_signature_save(signature, &r, &s);
+    } else {
+        memset(signature, 0, sizeof(*signature));
+    }
+    secp256k1_scalar_clear(&msg);
+    return ret;
+}
+
+int secp256k1_ecdsa_rerandomize_sig(const secp256k1_context* ctx, secp256k1_ecdsa_signature *new_sig, const secp256k1_ecdsa_signature *sig, const unsigned char *new_rand) {
+    secp256k1_scalar r, s, n;
+    int ret;
+    ARG_CHECK(secp256k1_ecmult_gen_context_is_built(&ctx->ecmult_gen_ctx));
+    ARG_CHECK(new_sig != NULL);
+    ARG_CHECK(sig != NULL);
+    ARG_CHECK(new_rand != NULL);
+
+    secp256k1_scalar_set_b32(&n, new_rand, NULL);
+    secp256k1_ecdsa_signature_load(ctx, &r, &s, sig);
+
+    if ((ret = secp256k1_ecdsa_rerandomize_sig_internal(&ctx->ecmult_gen_ctx, &r, &s, &n)) == 0) {
+        secp256k1_scalar_clear(&n);
+        return 0;
+    }
+
+    if (ret) {
+        secp256k1_ecdsa_signature_save(new_sig, &r, &s);
+    } else {
+        memset(new_sig, 0, sizeof(*new_sig));
+    }
+    secp256k1_scalar_clear(&n);
     return ret;
 }
 
