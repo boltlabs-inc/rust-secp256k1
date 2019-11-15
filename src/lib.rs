@@ -177,6 +177,11 @@ pub struct Signature(ffi::Signature);
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct PartialSignature(ffi::PartialSignature);
 
+// Curve point (for libzkchannels)
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct CurvePoint(ffi::CurvePoint);
+
+
 /// A DER serialized Signature
 #[derive(Copy, Clone)]
 pub struct SerializedSignature {
@@ -485,14 +490,94 @@ impl PartialSignature {
 }
 
 impl fmt::Display for PartialSignature {
-fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    let sig = self.serialize_compact();
-    for v in sig.iter() {
-        write!(f, "{:02x}", v)?;
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let sig = self.serialize_compact();
+        for v in sig.iter() {
+            write!(f, "{:02x}", v)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
+
+impl CPtr for CurvePoint {
+    type Target = ffi::CurvePoint;
+    fn as_c_ptr(&self) -> *const Self::Target {
+        self.as_ptr()
+    }
+
+    fn as_mut_c_ptr(&mut self) -> *mut Self::Target {
+        self.as_mut_ptr()
+    }
 }
+
+impl From<ffi::CurvePoint> for CurvePoint {
+    #[inline]
+    fn from(pt: ffi::CurvePoint) -> CurvePoint {
+        CurvePoint(pt)
+    }
+}
+
+impl CurvePoint {
+    #[inline]
+    /// Serializes the signature in compact format
+    pub fn serialize_compact(&self) -> [u8; 64] {
+        let mut ret = [0; 64];
+        unsafe {
+            let err = ffi::secp256k1_ecdsa_curve_point_serialize_compact(
+                ffi::secp256k1_context_no_precomp,
+                ret.as_mut_c_ptr(),
+                self.as_c_ptr(),
+            );
+            debug_assert!(err == 1);
+        }
+        ret
+    }
+
+    /// Converts a 96-byte compact-encoded byte slice to a signature
+    pub fn from_compact(data: &[u8]) -> Result<CurvePoint, Error> {
+        let mut ret = ffi::CurvePoint::new();
+        if data.len() != 64 {
+            return Err(Error::InvalidSignature)
+        }
+
+        unsafe {
+            if ffi::secp256k1_ecdsa_curve_point_parse_compact(
+                ffi::secp256k1_context_no_precomp,
+                &mut ret,
+                data.as_c_ptr(),
+            ) == 1
+            {
+                Ok(CurvePoint(ret))
+            } else {
+                Err(Error::InvalidSignature)
+            }
+        }
+    }
+
+
+    /// Obtains a raw pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_ptr(&self) -> *const ffi::CurvePoint {
+        &self.0 as *const _
+    }
+
+    /// Obtains a raw mutable pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut ffi::CurvePoint {
+        &mut self.0 as *mut _
+    }
+}
+
+impl fmt::Display for CurvePoint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let point = self.serialize_compact();
+        for v in point.iter() {
+            write!(f, "{:02x}", v)?;
+        }
+        Ok(())
+    }
+}
+
 
 // end for libzkchannels
 
@@ -726,14 +811,15 @@ impl<C: Signing> Secp256k1<C> {
 
     // Compute a partial signature by precomputing the r = (r_x, r_y), partial s = (r_x * x) mod q
     // and k^-1. Nonce data represents the random seed to PRG for computing k.
-    pub fn partial_sign(&self, noncedata: &Message, sk: &key::SecretKey) -> PartialSignature {
+    pub fn partial_sign(&self, noncedata: &Message, sk: &key::SecretKey) -> (PartialSignature, CurvePoint) {
         let mut ret = ffi::PartialSignature::new();
+        let mut ret2 = ffi::CurvePoint::new();
         unsafe {
-            assert_eq!(ffi::secp256k1_ecdsa_precompute_sig(self.ctx, &mut ret, noncedata.as_c_ptr(),
+            assert_eq!(ffi::secp256k1_ecdsa_precompute_sig(self.ctx, &mut ret, &mut ret2,noncedata.as_c_ptr(),
                                                  sk.as_c_ptr(), ffi::secp256k1_nonce_function_rfc6979), 1);
         }
 
-        PartialSignature::from(ret)
+        (PartialSignature::from(ret), CurvePoint::from(ret2))
     }
 
     pub fn compute_sign(&self, msg: &Message, partial_sig: &PartialSignature) -> Signature {
@@ -745,10 +831,10 @@ impl<C: Signing> Secp256k1<C> {
         Signature::from(ret)
     }
 
-    pub fn rerandomize_sig(&self, rand: &Message, sig: &Signature) -> Signature {
+    pub fn rerandomize_sig(&self, rand: &Message, rxy: &CurvePoint, sig: &Signature) -> Signature {
         let mut ret = ffi::Signature::new();
         unsafe {
-            assert_eq!(ffi::secp256k1_ecdsa_rerandomize_sig(self.ctx, &mut ret, sig.as_c_ptr(), rand.as_c_ptr()), 1);
+            assert_eq!(ffi::secp256k1_ecdsa_rerandomize_sig(self.ctx, &mut ret, sig.as_c_ptr(), rxy.as_c_ptr(),rand.as_c_ptr()), 1);
         }
         Signature::from(ret)
     }

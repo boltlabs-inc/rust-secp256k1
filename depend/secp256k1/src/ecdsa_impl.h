@@ -255,15 +255,18 @@ static int secp256k1_ecdsa_sig_verify(const secp256k1_ecmult_context *ctx, const
         /* xr * pr.z^2 mod p == pr.x, so the signature is valid. */
         return 1;
     }
+
     if (secp256k1_fe_cmp_var(&xr, &secp256k1_ecdsa_const_p_minus_order) >= 0) {
         /* xr + n >= p, so we can skip testing the second case. */
         return 0;
     }
+
     secp256k1_fe_add(&xr, &secp256k1_ecdsa_const_order_as_fe);
     if (secp256k1_gej_eq_x_var(&xr, &pr)) {
         /* (xr + n) * pr.z^2 mod p == pr.x, so the signature is valid. */
         return 1;
     }
+
     return 0;
 #endif
 }
@@ -310,20 +313,20 @@ static int secp256k1_ecdsa_sig_sign(const secp256k1_ecmult_gen_context *ctx, sec
     return 1;
 }
 
-static int secp256k1_ecdsa_precompute_sig_internal(const secp256k1_ecmult_gen_context *ctx,
+static int secp256k1_ecdsa_precompute_sig_internal(const secp256k1_ecmult_gen_context *ctx, secp256k1_ge *r,
                                           secp256k1_scalar *sig_r, secp256k1_scalar *sig_s_partial,
                                           secp256k1_scalar *sig_k_inv, const secp256k1_scalar *seckey,
                                           const secp256k1_scalar *nonce, int *recid) {
     unsigned char b[32];
     secp256k1_gej rp;
-    secp256k1_ge r;
+    // secp256k1_ge r;
     int overflow = 0;
 
     secp256k1_ecmult_gen(ctx, &rp, nonce);
-    secp256k1_ge_set_gej(&r, &rp);
-    secp256k1_fe_normalize(&r.x);
-    secp256k1_fe_normalize(&r.y);
-    secp256k1_fe_get_b32(b, &r.x);
+    secp256k1_ge_set_gej(r, &rp);
+    secp256k1_fe_normalize(&r->x);
+    secp256k1_fe_normalize(&r->y);
+    secp256k1_fe_get_b32(b, &r->x);
     secp256k1_scalar_set_b32(sig_r, b, &overflow);
     /* These two conditions should be checked before calling */
     VERIFY_CHECK(!secp256k1_scalar_is_zero(sig_r));
@@ -333,14 +336,13 @@ static int secp256k1_ecdsa_precompute_sig_internal(const secp256k1_ecmult_gen_co
         /* The overflow condition is cryptographically unreachable as hitting it requires finding the discrete log
          * of some P where P.x >= order, and only 1 in about 2^127 points meet this criteria.
          */
-        *recid = (overflow ? 2 : 0) | (secp256k1_fe_is_odd(&r.y) ? 1 : 0);
+        *recid = (overflow ? 2 : 0) | (secp256k1_fe_is_odd(&r->y) ? 1 : 0);
     }
 
     secp256k1_scalar_mul(sig_s_partial, sig_r, seckey); /* compute r = r_x * x mod q */
     secp256k1_scalar_inverse(sig_k_inv, nonce); /* compute k^-1 */
 
     secp256k1_gej_clear(&rp);
-    secp256k1_ge_clear(&r);
     return 1;
 }
 
@@ -365,17 +367,34 @@ static int secp256k1_ecdsa_finalize_sig_internal(const secp256k1_ecmult_gen_cont
     return 1;
 }
 
-static int secp256k1_ecdsa_rerandomize_sig_internal(const secp256k1_ecmult_gen_context *ctx, secp256k1_scalar *sig_r, secp256k1_scalar *sig_s, const secp256k1_scalar *new_rand) {
-    if (secp256k1_scalar_is_zero(sig_r) || secp256k1_scalar_is_zero(sig_s)) {
+static int secp256k1_ecdsa_rerandomize_sig_internal(const secp256k1_ecmult_context *ctx, secp256k1_ge *r, secp256k1_scalar *sig_r, secp256k1_scalar *sig_s, const secp256k1_scalar *new_tweak) {
+    if (secp256k1_scalar_is_zero(sig_r) || secp256k1_scalar_is_zero(sig_s) || secp256k1_scalar_is_zero(new_tweak)) {
         return 0;
     }
-    if (ctx == NULL)
-        return 0;
 
-    secp256k1_scalar jinv;
+    unsigned char b[32];
 
-    secp256k1_scalar_mul(sig_r, sig_r, new_rand);
-    secp256k1_scalar_inverse(&jinv, new_rand);
+    secp256k1_scalar jinv, zero, fixed_tweak;
+    secp256k1_gej pr;
+    int overflow;
+
+    secp256k1_scalar_set_int(&zero, 0);
+    secp256k1_scalar_set_int(&fixed_tweak, 123456789);
+
+    secp256k1_gej_set_ge(&pr, r);
+    secp256k1_ecmult(ctx, &pr, &pr, &fixed_tweak, &zero);
+    secp256k1_ge_set_gej(r, &pr);
+
+    secp256k1_fe_normalize(&r->x);
+    secp256k1_fe_normalize(&r->y);
+    secp256k1_fe_get_b32(b, &r->x);
+    secp256k1_scalar_set_b32(sig_r, b, &overflow);
+
+    /* These two conditions should be checked before calling */
+    VERIFY_CHECK(!secp256k1_scalar_is_zero(sig_r));
+    VERIFY_CHECK(overflow == 0);
+
+    secp256k1_scalar_inverse(&jinv, &fixed_tweak);
     secp256k1_scalar_mul(sig_s, sig_s, &jinv);
     secp256k1_scalar_clear(&jinv);
 

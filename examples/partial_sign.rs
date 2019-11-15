@@ -2,7 +2,7 @@ extern crate bitcoin_hashes;
 extern crate secp256k1;
 
 use bitcoin_hashes::{sha256, Hash};
-use secp256k1::{Error, Message, PublicKey, Secp256k1, Signing, SecretKey, Signature, PartialSignature, Verification};
+use secp256k1::{Error, Message, PublicKey, Secp256k1, Signing, SecretKey, Signature, PartialSignature, CurvePoint, Verification};
 
 fn sign<C: Signing>(secp: &Secp256k1<C>, msg: &[u8], seckey: [u8; 32]) -> Result<Signature, Error> {
     let msg = sha256::Hash::hash(msg);
@@ -12,7 +12,7 @@ fn sign<C: Signing>(secp: &Secp256k1<C>, msg: &[u8], seckey: [u8; 32]) -> Result
 }
 
 // compute a presignature
-fn partial_sign<C: Signing>(secp: &Secp256k1<C>, nonce32: &[u8], seckey: [u8; 32]) -> Result<PartialSignature, Error> {
+fn partial_sign<C: Signing>(secp: &Secp256k1<C>, nonce32: &[u8], seckey: [u8; 32]) -> Result<(PartialSignature, CurvePoint), Error> {
     let msg = sha256::Hash::hash(nonce32);
     let nonce = Message::from_slice(&msg)?;
     let seckey = SecretKey::from_slice(&seckey)?;
@@ -37,11 +37,12 @@ fn verify<C: Verification>(secp: &Secp256k1<C>, msg: &[u8], sig: [u8; 64], pubke
     Ok(secp.verify(&msg, &sig, &pubkey).is_ok())
 }
 
-fn rerandomize<C: Signing>(secp: &Secp256k1<C>, rand: &[u8], sig: [u8; 64]) -> Result<Signature, Error> {
+fn rerandomize<C: Signing>(secp: &Secp256k1<C>, rand: &[u8], pt: [u8; 64], sig: [u8; 64]) -> Result<Signature, Error> {
     let msg = sha256::Hash::hash(rand);
     let rand = Message::from_slice(&msg)?;
+    let rxy = CurvePoint::from_compact(&pt)?;
     let sig = Signature::from_compact(&sig)?;
-    Ok(secp.rerandomize_sig(&rand, &sig))
+    Ok(secp.rerandomize_sig(&rand, &rxy, &sig))
 }
 
 
@@ -53,11 +54,14 @@ fn main() {
     let nonce = b"Random seed for picking nonces";
     let msg = b"Random message to sign";
 
-    let partial_sig = partial_sign(&secp, nonce, seckey.clone()).unwrap();
+    let (partial_sig, curve_pt) = partial_sign(&secp, nonce, seckey.clone()).unwrap();
 
     println!("Partial sig bytes: {}", partial_sig);
 
+    println!("Curve point: {}", curve_pt);
+
     let ser_partial_sig = partial_sig.serialize_compact();
+    let ser_curve_pt = curve_pt.serialize_compact();
 
     let signature = complete_sign(&secp, msg, ser_partial_sig).unwrap();
 
@@ -65,21 +69,22 @@ fn main() {
 
     println!("Output sig 0: {:?}", signature);
 
-//    let signature1 = sign(&secp, msg, seckey.clone()).unwrap();
-//    let serialize_sig1 = signature1.serialize_compact();
-//
-//    println!("Output sig 1: {:?}", signature1);
+    let signature1 = sign(&secp, msg, seckey.clone()).unwrap();
+    let serialize_sig1 = signature1.serialize_compact();
+
+    println!("Output sig 1: {:?}", signature1);
 
     assert!(verify(&secp, msg, serialize_sig, pubkey).unwrap());
+    assert!(verify(&secp, msg, serialize_sig1, pubkey).unwrap());
 
     println!("Successfully verified signature!");
 
-    let rand = [92, 253, 80, 231, 48, 193, 182, 87, 119, 152, 225, 241, 38, 178, 26, 7, 215, 111, 2, 19, 149, 160, 63, 96, 46, 73, 11, 106, 189, 116, 146, 2];
-    let new_signature = rerandomize(&secp, &rand, serialize_sig).unwrap();
+    let rand = [92, 253, 80, 231, 48, 193, 182, 87, 119, 152, 225, 241, 38, 178, 26, 7, 215, 111, 2, 19, 149, 160, 63, 96, 46, 73, 11, 106, 189, 116, 146, 1];
+    // TODO: still not working
+    let rand_signature= rerandomize(&secp, &rand, ser_curve_pt, serialize_sig).unwrap();
 
-    println!("Output sig 1: {:?}", new_signature);
-    let serialize_sig1 = new_signature.serialize_compact();
+    println!("Output sig 2: {:?}", rand_signature);
+    let serialize_sig2 = rand_signature.serialize_compact();
 
-    //assert!(verify(&secp, msg, serialize_sig1, pubkey).unwrap());
-
+    // assert!(verify(&secp, msg, serialize_sig2, pubkey).unwrap());
 }
