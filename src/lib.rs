@@ -129,6 +129,12 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
+// In general, rust is absolutely horrid at supporting users doing things like,
+// for example, compiling Rust code for real environments. Disable useless lints
+// that don't do anything but annoy us and cant actually ever be resolved.
+#![allow(bare_trait_objects)]
+#![allow(ellipsis_inclusive_range_patterns)]
+
 #![cfg_attr(feature = "dev", allow(unstable_features))]
 #![cfg_attr(feature = "dev", feature(plugin))]
 #![cfg_attr(feature = "dev", plugin(clippy))]
@@ -166,6 +172,15 @@ use ffi::CPtr;
 /// An ECDSA signature
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Signature(ffi::Signature);
+
+// A partial ECDSA signature (for libzkchannels)
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct PartialSignature(ffi::PartialSignature);
+
+// Curve point (for libzkchannels)
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct CurvePoint(ffi::CurvePoint);
+
 
 /// A DER serialized Signature
 #[derive(Copy, Clone)]
@@ -404,6 +419,167 @@ impl From<ffi::Signature> for Signature {
     }
 }
 
+// start for libzkchannels
+impl CPtr for PartialSignature {
+    type Target = ffi::PartialSignature;
+    fn as_c_ptr(&self) -> *const Self::Target {
+        self.as_ptr()
+    }
+
+    fn as_mut_c_ptr(&mut self) -> *mut Self::Target {
+        self.as_mut_ptr()
+    }
+}
+
+impl From<ffi::PartialSignature> for PartialSignature {
+    #[inline]
+    fn from(sig: ffi::PartialSignature) -> PartialSignature {
+        PartialSignature(sig)
+    }
+}
+
+impl PartialSignature {
+    #[inline]
+    /// Serializes the signature in compact format
+    pub fn serialize_compact(&self) -> [u8; 96] {
+        let mut ret = [0; 96];
+        unsafe {
+            let err = ffi::secp256k1_ecdsa_partial_signature_serialize_compact(
+                ffi::secp256k1_context_no_precomp,
+                ret.as_mut_c_ptr(),
+                self.as_c_ptr(),
+            );
+            debug_assert!(err == 1);
+        }
+        ret
+    }
+
+    /// Converts a 96-byte compact-encoded byte slice to a signature
+    pub fn from_compact(data: &[u8]) -> Result<PartialSignature, Error> {
+        let mut ret = ffi::PartialSignature::new();
+        if data.len() != 96 {
+            return Err(Error::InvalidSignature)
+        }
+
+        unsafe {
+            if ffi::secp256k1_ecdsa_partial_signature_parse_compact(
+                ffi::secp256k1_context_no_precomp,
+                &mut ret,
+                data.as_c_ptr(),
+            ) == 1
+            {
+                Ok(PartialSignature(ret))
+            } else {
+                Err(Error::InvalidSignature)
+            }
+        }
+    }
+
+
+    /// Obtains a raw pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_ptr(&self) -> *const ffi::PartialSignature {
+        &self.0 as *const _
+    }
+
+    /// Obtains a raw mutable pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut ffi::PartialSignature {
+        &mut self.0 as *mut _
+    }
+}
+
+impl fmt::Display for PartialSignature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let sig = self.serialize_compact();
+        for v in sig.iter() {
+            write!(f, "{:02x}", v)?;
+        }
+        Ok(())
+    }
+}
+
+impl CPtr for CurvePoint {
+    type Target = ffi::CurvePoint;
+    fn as_c_ptr(&self) -> *const Self::Target {
+        self.as_ptr()
+    }
+
+    fn as_mut_c_ptr(&mut self) -> *mut Self::Target {
+        self.as_mut_ptr()
+    }
+}
+
+impl From<ffi::CurvePoint> for CurvePoint {
+    #[inline]
+    fn from(pt: ffi::CurvePoint) -> CurvePoint {
+        CurvePoint(pt)
+    }
+}
+
+impl CurvePoint {
+    #[inline]
+    /// Serializes the signature in compact format
+    pub fn serialize_compact(&self) -> [u8; 64] {
+        let mut ret = [0; 64];
+        unsafe {
+            let err = ffi::secp256k1_ecdsa_curve_point_serialize_compact(
+                ffi::secp256k1_context_no_precomp,
+                ret.as_mut_c_ptr(),
+                self.as_c_ptr(),
+            );
+            debug_assert!(err == 1);
+        }
+        ret
+    }
+
+    /// Converts a 96-byte compact-encoded byte slice to a signature
+    pub fn from_compact(data: &[u8]) -> Result<CurvePoint, Error> {
+        let mut ret = ffi::CurvePoint::new();
+        if data.len() != 64 {
+            return Err(Error::InvalidSignature)
+        }
+
+        unsafe {
+            if ffi::secp256k1_ecdsa_curve_point_parse_compact(
+                ffi::secp256k1_context_no_precomp,
+                &mut ret,
+                data.as_c_ptr(),
+            ) == 1
+            {
+                Ok(CurvePoint(ret))
+            } else {
+                Err(Error::InvalidSignature)
+            }
+        }
+    }
+
+
+    /// Obtains a raw pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_ptr(&self) -> *const ffi::CurvePoint {
+        &self.0 as *const _
+    }
+
+    /// Obtains a raw mutable pointer suitable for use with FFI functions
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut ffi::CurvePoint {
+        &mut self.0 as *mut _
+    }
+}
+
+impl fmt::Display for CurvePoint {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let point = self.serialize_compact();
+        for v in point.iter() {
+            write!(f, "{:02x}", v)?;
+        }
+        Ok(())
+    }
+}
+
+
+// end for libzkchannels
 
 #[cfg(feature = "serde")]
 impl ::serde::Serialize for Signature {
@@ -633,6 +809,36 @@ impl<C: Signing> Secp256k1<C> {
         Signature::from(ret)
     }
 
+    // Compute a partial signature by precomputing the r = (r_x, r_y), partial s = (r_x * x) mod q
+    // and k^-1. Nonce data represents the random seed to PRG for computing k.
+    pub fn partial_sign(&self, noncedata: &Message, sk: &key::SecretKey) -> (PartialSignature, CurvePoint) {
+        let mut ret = ffi::PartialSignature::new();
+        let mut ret2 = ffi::CurvePoint::new();
+        unsafe {
+            assert_eq!(ffi::secp256k1_ecdsa_precompute_sig(self.ctx, &mut ret, &mut ret2,noncedata.as_c_ptr(),
+                                                 sk.as_c_ptr(), ffi::secp256k1_nonce_function_rfc6979), 1);
+        }
+
+        (PartialSignature::from(ret), CurvePoint::from(ret2))
+    }
+
+    pub fn compute_sign(&self, msg: &Message, partial_sig: &PartialSignature) -> Signature {
+        let mut ret = ffi::Signature::new();
+        unsafe {
+            assert_eq!(ffi::secp256k1_ecdsa_finalize_sig(self.ctx, &mut ret, partial_sig.as_c_ptr(), msg.as_c_ptr()), 1);
+        }
+
+        Signature::from(ret)
+    }
+
+    pub fn rerandomize_sig(&self, rand: &Message, rxy: &CurvePoint, sig: &Signature) -> Signature {
+        let mut ret = ffi::Signature::new();
+        unsafe {
+            assert_eq!(ffi::secp256k1_ecdsa_rerandomize_sig(self.ctx, &mut ret, sig.as_c_ptr(), rxy.as_c_ptr(),rand.as_c_ptr()), 1);
+        }
+        Signature::from(ret)
+    }
+
     /// Generates a random keypair. Convenience function for `key::SecretKey::new`
     /// and `key::PublicKey::from_secret_key`; call those functions directly for
     /// batch key generation. Requires a signing-capable context. Requires compilation
@@ -717,6 +923,7 @@ mod tests {
 
 
     #[test]
+    #[cfg(not(feature = "dont_replace_c_symbols"))]
     fn test_manual_create_destroy() {
         let ctx_full = unsafe { ffi::secp256k1_context_create(AllPreallocated::FLAGS) };
         let ctx_sign = unsafe { ffi::secp256k1_context_create(SignOnlyPreallocated::FLAGS) };
