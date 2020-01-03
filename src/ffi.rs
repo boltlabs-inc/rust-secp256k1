@@ -113,6 +113,47 @@ impl Default for Signature {
     }
 }
 
+/// Library-internal representation of a Secp256k1 precomputed signature (for libzkchannels)
+#[repr(C)]
+pub struct PartialSignature([c_uchar; 96]);
+impl_array_newtype!(PartialSignature, c_uchar, 96);
+impl_raw_debug!(PartialSignature);
+
+impl PartialSignature {
+    /// Create a new (zeroed) signature usable for the FFI interface
+    pub fn new() -> PartialSignature { PartialSignature([0; 96]) }
+    /// Create a new (uninitialized) signature usable for the FFI interface
+    #[deprecated(since = "0.15.3", note = "Please use the new function instead")]
+    pub unsafe fn blank() -> PartialSignature { PartialSignature::new() }
+}
+
+impl Default for PartialSignature {
+    fn default() -> Self {
+        PartialSignature::new()
+    }
+}
+
+/// Library-internal representation of a Secp256k1 curve point (for libzkchannels)
+#[repr(C)]
+pub struct CurvePoint([c_uchar; 64]);
+impl_array_newtype!(CurvePoint, c_uchar, 64);
+impl_raw_debug!(CurvePoint);
+
+impl CurvePoint {
+    /// Create a new (zeroed) signature usable for the FFI interface
+    pub fn new() -> CurvePoint { CurvePoint([0; 64]) }
+    /// Create a new (uninitialized) signature usable for the FFI interface
+    #[deprecated(since = "0.15.3", note = "Please use the new function instead")]
+    pub unsafe fn blank() -> CurvePoint { CurvePoint::new() }
+}
+
+impl Default for CurvePoint {
+    fn default() -> Self {
+        CurvePoint::new()
+    }
+}
+
+
 /// Library-internal representation of an ECDH shared secret
 #[repr(C)]
 pub struct SharedSecret([c_uchar; 32]);
@@ -178,6 +219,15 @@ extern "C" {
                                                    input64: *const c_uchar)
                                                    -> c_int;
 
+    // parse partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_partial_signature_parse_compact(cx: *const Context, sig: *mut PartialSignature,
+                                                   input64: *const c_uchar)
+                                                   -> c_int;
+    pub fn secp256k1_ecdsa_curve_point_parse_compact(cx: *const Context, pt: *mut CurvePoint,
+                                                   input64: *const c_uchar)
+                                                   -> c_int;
+
+
     pub fn ecdsa_signature_parse_der_lax(cx: *const Context, sig: *mut Signature,
                                          input: *const c_uchar, in_len: usize)
                                          -> c_int;
@@ -189,6 +239,15 @@ extern "C" {
     pub fn secp256k1_ecdsa_signature_serialize_compact(cx: *const Context, output64: *const c_uchar,
                                                        sig: *const Signature)
                                                        -> c_int;
+
+    // serialize for partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_partial_signature_serialize_compact(cx: *const Context, output96: *const c_uchar,
+                                                       sig: *const PartialSignature)
+                                                       -> c_int;
+    pub fn secp256k1_ecdsa_curve_point_serialize_compact(cx: *const Context, output64: *const c_uchar,
+                                                       pt: *const CurvePoint)
+                                                       -> c_int;
+
 
     pub fn secp256k1_ecdsa_signature_normalize(cx: *const Context, out_sig: *mut Signature,
                                                in_sig: *const Signature)
@@ -208,6 +267,29 @@ extern "C" {
                                 noncefn: NonceFn,
                                 noncedata: *const c_void)
                                 -> c_int;
+
+    // compute partial signature (for libzkchannels)
+    pub fn secp256k1_ecdsa_precompute_sig(cx: *const Context,
+                                          pre_sig: *mut PartialSignature,
+                                          pt: *mut CurvePoint,
+                                          noncedata32: *const c_uchar,
+                                          sk: *const c_uchar,
+                                          noncefn: NonceFn)
+                                          -> c_int;
+
+    // for completing sig generation with message (for libzkchannels)
+    pub fn secp256k1_ecdsa_finalize_sig(cx: *const Context,
+                                          sig: *mut Signature,
+                                          partial_sig: *const PartialSignature,
+                                          msg: *const c_uchar)
+                                          -> c_int;
+
+    // for rerandomizing sig (for libzkchannels)
+    pub fn secp256k1_ecdsa_rerandomize_sig(cx: *const Context,
+                                          new_sig: *mut Signature,
+                                          sig: *const Signature,
+                                          rxy: *const CurvePoint,
+                                          rand: *const c_uchar) -> c_int;
 
     // EC
     pub fn secp256k1_ec_seckey_verify(cx: *const Context,
